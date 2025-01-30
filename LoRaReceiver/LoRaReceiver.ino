@@ -59,10 +59,7 @@ void setup()
     server.on("/", HTTP_GET, []() {
         String page = "<html>\
         <body>\
-        <h2>LoRa Web Interface</h2>\
-        <form action='/send' method='POST'>\
-        <input type='text' name='message' maxlength='20'>\
-        <input type='submit' value='Send'>\
+        <h2>LoRa Web Interface LoRaReceiver</h2>\
         </form>\
         <h3>LoRa Settings</h3>\
         <form action='/update' method='POST'>\

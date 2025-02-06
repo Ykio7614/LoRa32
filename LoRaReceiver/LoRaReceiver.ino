@@ -40,6 +40,26 @@ void applyLoRaSettings() {
     LoRa.setSignalBandwidth(signalBandwidth * 1000);
 }
 
+int countBitErrors(String received, String reference) {
+    int errors = 0;
+    int len = min(received.length(), reference.length());
+
+    for (int i = 0; i < len; i++) {
+        char recvChar = received[i];
+        char refChar = reference[i];
+
+        // Подсчет битовых ошибок через XOR
+        for (int bit = 0; bit < 8; bit++) {
+            if (((recvChar >> bit) & 1) != ((refChar >> bit) & 1)) {
+                errors++;
+            }
+        }
+    }
+    return errors;
+}
+
+
+
 void setup()
 {
     setupBoards();
@@ -139,10 +159,19 @@ void loop()
         while (LoRa.available()) {
             recv += (char)LoRa.read();
         }
+
+        String reference = "Lorem ipsum dolor sit amet";
+        int bitErrors = countBitErrors(recv.substring(0, 26), reference);
+
+
+        Serial.print("Rssi: ");
         Serial.print(LoRa.packetRssi());
-        Serial.print(" ");
+        Serial.print(" Snr: ");
         Serial.print(LoRa.packetSnr());
+        Serial.print(" Bit errors: ");
+        Serial.println(bitErrors);
         Serial.print("\n");
+
         if (u8g2) {
             u8g2->clearBuffer();
             char buf[256];

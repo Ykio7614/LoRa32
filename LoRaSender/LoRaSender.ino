@@ -55,6 +55,8 @@ void setup()
     Serial.print("ESP32 Local IP: ");
     Serial.println(WiFi.localIP());
 
+    Serial.println(sizeof("Lorem ipsum dolor sit amet"));
+
     server.on("/", HTTP_GET, []() {
         String page = "<html>\
         <body>\
@@ -69,7 +71,7 @@ void setup()
         <h3>Send LoRa Packets</h3>\
         <form action='/send' method='POST'>\
         Number of Packets: <input type='number' name='count' min='1' max='100' value='1'><br>\
-        Delay Between Packets (ms): <input type='number' name='delay' min='1000' max='60000' value='" + String(packetDelay) + "'><br>\
+        Delay Between Packets (ms): <input type='number' name='delay' min='500' max='60000' value='" + String(packetDelay) + "'><br>\
         <input type='submit' value='Send Packets'>\
         </form>\
         </body>\
@@ -143,7 +145,7 @@ void loop()
         Serial.println(counter);
 
         LoRa.beginPacket();
-        LoRa.print("hello ");
+        LoRa.print("Lorem ipsum dolor sit amet");
         LoRa.print(counter);
         LoRa.endPacket();
 

@@ -32,6 +32,7 @@ float signalBandwidth = CONFIG_RADIO_BW;
 int counter = 0;
 int packetCount = 0;
 bool sendingPackets = false;
+int packetDelay = 7000; // Default delay between packets in milliseconds
 
 void applyLoRaSettings() {
     LoRa.setSpreadingFactor(spreadingFactor);
@@ -41,10 +42,9 @@ void applyLoRaSettings() {
 
 void setup()
 {
-    setupBoards();
     WiFi.begin(ssid, password);
     Serial.begin(115200);
-    
+    setupBoards();
     Serial.print("Connecting to WiFi...");
     while (WiFi.status() != WL_CONNECTED) {
         delay(500);
@@ -69,6 +69,7 @@ void setup()
         <h3>Send LoRa Packets</h3>\
         <form action='/send' method='POST'>\
         Number of Packets: <input type='number' name='count' min='1' max='100' value='1'><br>\
+        Delay Between Packets (ms): <input type='number' name='delay' min='1000' max='60000' value='" + String(packetDelay) + "'><br>\
         <input type='submit' value='Send Packets'>\
         </form>\
         </body>\
@@ -99,8 +100,11 @@ void setup()
     server.on("/send", HTTP_POST, []() {
         if (server.hasArg("count")) {
             packetCount = server.arg("count").toInt();
-            sendingPackets = true;
         }
+        if (server.hasArg("delay")) {
+            packetDelay = server.arg("delay").toInt();
+        }
+        sendingPackets = true;
         server.sendHeader("Location", "/");
         server.send(303);
     });
@@ -146,7 +150,7 @@ void loop()
         counter++;
         packetCount--;
         if (packetCount > 0) {
-            delay(7000);
+            delay(packetDelay);
         } else {
             sendingPackets = false;
         }

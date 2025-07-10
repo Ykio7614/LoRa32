@@ -6,9 +6,15 @@
 #include "LoRaBoards.h"
 
 
-const char* ssid = "LilBoPeevo";  
-const char* password = "123123124";
+const char* ssid = "A54";  
+const char* password = "66666666";
+// const IPAddress local_IP(192, 168, 203, 101);   // Желаемый статический IP ESP32
+// const IPAddress gateway(192, 168, 203, 169);    // Gateway из вашего вывода 192.168.203.169
+// const IPAddress subnet(255, 255, 255, 0);      // Маска подсети
 
+char boardIP[16];
+
+bool showInfo = false;
 
 String webMessage = "Waiting for update...";
 
@@ -63,9 +69,16 @@ int countBitErrors(String received, String reference) {
 void setup()
 {
     setupBoards();
-    WiFi.begin(ssid, password);
+
     Serial.begin(115200);
     Serial.print("Connecting to WiFi...");
+
+    // if (!WiFi.config(local_IP, gateway, subnet)) {
+    //     Serial.println("Failed to configure static IP");
+    // }
+
+    WiFi.begin(ssid, password);
+    
     while (WiFi.status() != WL_CONNECTED) {
         delay(500);
         Serial.print(".");
@@ -74,7 +87,8 @@ void setup()
     Serial.println("\nConnected to Wi-Fi!");
     Serial.print("ESP32 Local IP: ");
     Serial.println(WiFi.localIP());
-    
+
+    strcpy(boardIP, WiFi.localIP().toString().c_str());
 
     server.on("/", HTTP_GET, []() {
         String page = "<html>\
@@ -94,6 +108,7 @@ void setup()
     });
 
 
+
     server.on("/update", HTTP_POST, []() {
         if (server.hasArg("sf") && server.hasArg("tx") && server.hasArg("bw")) {
             int newSF = server.arg("sf").toInt();
@@ -105,13 +120,18 @@ void setup()
             if (newBW >= 7.8 && newBW <= 500) signalBandwidth = newBW;
 
             applyLoRaSettings();
-            Serial.println("LoRa settings updated:");
-            Serial.print("Spreading Factor: "); Serial.println(spreadingFactor);
-            Serial.print("Tx Power: "); Serial.println(txPower);
-            Serial.print("Signal Bandwidth: "); Serial.println(signalBandwidth);
+            Serial.print("SettingsUpdated{ ");
+            Serial.print("SF: "); Serial.print(spreadingFactor);
+            Serial.print(" TX: "); Serial.print(txPower);
+            Serial.print(" BW: "); Serial.print(signalBandwidth);
+            Serial.print(" }");
+            Serial.print("\n");
         }
+        server.sendHeader("Access-Control-Allow-Origin", "*");
+        server.sendHeader("Access-Control-Allow-Methods", "POST, GET, OPTIONS");
+        server.sendHeader("Access-Control-Allow-Headers", "Content-Type");
         server.sendHeader("Location", "/");
-        server.send(303);
+        server.send(200, "text/plain", "OK");
     });
 
     server.begin();
@@ -140,7 +160,7 @@ void setup()
 
     LoRa.setSyncWord(0xAB);
 
-    LoRa.enableCrc();
+    LoRa.disableCrc();
 
     LoRa.disableInvertIQ();
 
@@ -163,25 +183,36 @@ void loop()
         String reference = "Lorem ipsum dolor sit amet";
         int bitErrors = countBitErrors(recv.substring(0, 26), reference);
 
-
+        Serial.print("PacketInfo{ ");
         Serial.print("Rssi: ");
         Serial.print(LoRa.packetRssi());
         Serial.print(" Snr: ");
         Serial.print(LoRa.packetSnr());
         Serial.print(" Bit errors: ");
-        Serial.println(bitErrors);
+        Serial.print(bitErrors);
+        Serial.print(" }");
         Serial.print("\n");
 
         if (u8g2) {
             u8g2->clearBuffer();
             char buf[256];
-            u8g2->drawStr(0, 12, "Received OK!");
+            u8g2->drawStr(0, 12, boardIP);
             u8g2->drawStr(0, 26, recv.c_str());
             snprintf(buf, sizeof(buf), "RSSI:%i", LoRa.packetRssi());
             u8g2->drawStr(0, 40, buf);
             snprintf(buf, sizeof(buf), "SNR:%.1f", LoRa.packetSnr());
             u8g2->drawStr(0, 56, buf);
             u8g2->sendBuffer();
+            showInfo = true;
+        }
+    }
+    if(showInfo == false){
+        if (u8g2) {
+            u8g2->clearBuffer();
+            u8g2->drawStr(0, 40, boardIP);
+            u8g2->drawStr(0, 56, "Receiver");
+            u8g2->sendBuffer();
+
         }
     }
 }

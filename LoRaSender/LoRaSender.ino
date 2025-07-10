@@ -5,8 +5,13 @@
 #include <LoRa.h>
 #include "LoRaBoards.h"
 
-const char* ssid = "A35";  
-const char* password = "66666666";
+const char* ssid = "LilBoPeevo";  
+const char* password = "123123124";
+// const IPAddress local_IP(192, 168, 24, 100);   // Желаемый статический IP ESP32
+// const IPAddress gateway(192, 168, 24, 116);    // Gateway из вашего вывода
+// const IPAddress subnet(255, 255, 255, 0);      // Маска подсети
+
+char boardIP[16];
 
 WebServer server(80);
 
@@ -32,7 +37,7 @@ float signalBandwidth = CONFIG_RADIO_BW;
 int counter = 0;
 int packetCount = 0;
 bool sendingPackets = false;
-int packetDelay = 7000; // Default delay between packets in milliseconds
+int packetDelay = 7000; 
 
 void applyLoRaSettings() {
     LoRa.setSpreadingFactor(spreadingFactor);
@@ -42,6 +47,10 @@ void applyLoRaSettings() {
 
 void setup()
 {
+
+    // if (!WiFi.config(local_IP, gateway, subnet)) {
+    //     Serial.println("Failed to configure static IP");
+    // }
     WiFi.begin(ssid, password);
     Serial.begin(115200);
     setupBoards();
@@ -54,6 +63,8 @@ void setup()
     Serial.println("\nConnected to Wi-Fi!");
     Serial.print("ESP32 Local IP: ");
     Serial.println(WiFi.localIP());
+
+    strcpy(boardIP, WiFi.localIP().toString().c_str());
 
     Serial.println(sizeof("Lorem ipsum dolor sit amet"));
 
@@ -79,6 +90,13 @@ void setup()
         server.send(200, "text/html", page);
     });
 
+    server.on("/update", HTTP_OPTIONS, []() {
+        server.sendHeader("Access-Control-Allow-Origin", "*");
+        server.sendHeader("Access-Control-Allow-Methods", "POST, GET, OPTIONS");
+        server.sendHeader("Access-Control-Allow-Headers", "Content-Type");
+        server.send(204);
+    });
+
     server.on("/update", HTTP_POST, []() {
         if (server.hasArg("sf") && server.hasArg("tx") && server.hasArg("bw")) {
             int newSF = server.arg("sf").toInt();
@@ -95,9 +113,21 @@ void setup()
             Serial.print("Tx Power: "); Serial.println(txPower);
             Serial.print("Signal Bandwidth: "); Serial.println(signalBandwidth);
         }
+        
+        server.sendHeader("Access-Control-Allow-Origin", "*");
+        server.sendHeader("Access-Control-Allow-Methods", "POST, GET, OPTIONS");
+        server.sendHeader("Access-Control-Allow-Headers", "Content-Type");
         server.sendHeader("Location", "/");
-        server.send(303);
+        server.send(200, "text/plain", "OK");
     });
+
+    server.on("/send", HTTP_OPTIONS, []() {
+        server.sendHeader("Access-Control-Allow-Origin", "*");
+        server.sendHeader("Access-Control-Allow-Methods", "POST, GET, OPTIONS");
+        server.sendHeader("Access-Control-Allow-Headers", "Content-Type");
+        server.send(204);
+    });
+
 
     server.on("/send", HTTP_POST, []() {
         if (server.hasArg("count")) {
@@ -107,9 +137,14 @@ void setup()
             packetDelay = server.arg("delay").toInt();
         }
         sendingPackets = true;
-        server.sendHeader("Location", "/");
-        server.send(303);
+
+        server.sendHeader("Access-Control-Allow-Origin", "*");
+        server.sendHeader("Access-Control-Allow-Methods", "POST, GET, OPTIONS");
+        server.sendHeader("Access-Control-Allow-Headers", "Content-Type");
+        
+        server.send(200, "text/plain", "Packets Sending");
     });
+
 
     server.begin();
     Serial.println("HTTP Server Started");
@@ -132,7 +167,7 @@ void setup()
 
     LoRa.setPreambleLength(16);
     LoRa.setSyncWord(0xAB);
-    LoRa.enableCrc();
+    LoRa.disableCrc();
     LoRa.disableInvertIQ();
     LoRa.setCodingRate4(7);
 }
@@ -156,5 +191,13 @@ void loop()
         } else {
             sendingPackets = false;
         }
+    }
+
+    if (u8g2) {
+        u8g2->clearBuffer();
+        u8g2->drawStr(0, 12, boardIP);
+        u8g2->drawStr(0, 26, "Sender");
+        u8g2->sendBuffer();
+
     }
 }

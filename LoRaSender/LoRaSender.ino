@@ -1,42 +1,36 @@
-#include <LoRa.h>               // #include <LoRa.h>
-#include "LoRaBoards.h"         // #include "LoRaBoards.h"
+#include <LoRa.h>
+#include "LoRaBoards.h"
 #include <TinyGPSPlus.h>
 
+// UART для GSMESP
+#define TX_PIN 17
+#define RX_PIN 16
+
+// Кнопка
+#define BUTTON_PIN 21
 
 TinyGPSPlus gps;
-#define gpsSerial Serial2   
+#define gpsSerial Serial2
 
 #ifndef CONFIG_RADIO_FREQ
-#define CONFIG_RADIO_FREQ           868.0
-#endif
-#ifndef CONFIG_RADIO_OUTPUT_POWER
-#define CONFIG_RADIO_OUTPUT_POWER   17
-#endif
-#ifndef CONFIG_RADIO_BW
-#define CONFIG_RADIO_BW             125.0
+#define CONFIG_RADIO_FREQ 868.0
 #endif
 
 #if !defined(USING_SX1276) && !defined(USING_SX1278)
 #error "LoRa example is only allowed to run SX1276/78."
 #endif
 
-int spreadingFactor = 12;
-int txPower = CONFIG_RADIO_OUTPUT_POWER;
-float signalBandwidth = CONFIG_RADIO_BW;
+int spreadingFactor = 12;     // spreading factor
+float signalBandwidth = 125.0; // bandwidth (kHz)
+int txPower = 14;             // tx power (dBm)
 
-int counter = 0;
-unsigned long lastSend = 0;
-const unsigned long sendInterval = 10000; // 10 секунд
-
-uint32_t currentID = 0;
-uint16_t seqNum = 0;
-uint16_t packetsPerID = 10; // сколько пакетов отправлять под одним ID
-uint16_t packetsSent = 0;
-
+// GPS и ID
 double lastLat = 0.0;
 double lastLng = 0.0;
 bool hasFix = false;
+uint32_t currentID = 0;
 
+// ---------------------- ХЭШ-ФУНКЦИЯ ----------------------
 uint32_t fnv1a_hash(const char* str) {
     uint32_t hash = 2166136261UL;
     while (*str) {
@@ -46,193 +40,155 @@ uint32_t fnv1a_hash(const char* str) {
     return hash;
 }
 
-
-void applyLoRaSettings() {
-  LoRa.setSpreadingFactor(spreadingFactor);
-  LoRa.setTxPower(txPower);
-  LoRa.setSignalBandwidth(signalBandwidth * 1000);
-}
-
-
 void setup() {
-  Serial.begin(115200);
+    Serial.begin(115200);
+    Serial1.begin(9600, SERIAL_8N1, RX_PIN, TX_PIN); // UART для GSMESP
+    gpsSerial.begin(9600, SERIAL_8N1, 22, 23);
 
-  
-  Serial.println("Waiting for GPS fix...");
+    pinMode(BUTTON_PIN, INPUT_PULLUP);
 
-  Serial.println("=== LoRa Initialization ===");
-  setupBoards(true);
-  gpsSerial.begin(9600, SERIAL_8N1, 22, 23);
+    Serial.println("LoRa Slave starting...");
+    setupBoards();
 
 #ifdef RADIO_TCXO_ENABLE
-  Serial.print("TCXO enable pin: ");
-  Serial.println(RADIO_TCXO_ENABLE);
-  pinMode(RADIO_TCXO_ENABLE, OUTPUT);
-  digitalWrite(RADIO_TCXO_ENABLE, HIGH);
-  delay(5); 
+    pinMode(RADIO_TCXO_ENABLE, OUTPUT);
+    digitalWrite(RADIO_TCXO_ENABLE, HIGH);
+    delay(5);
 #endif
 
-  Serial.print("LoRa Pins: CS=");
-  Serial.print(RADIO_CS_PIN);
-  Serial.print(", RST=");
-  Serial.print(RADIO_RST_PIN);
-  Serial.print(", DIO0=");
-  Serial.println(RADIO_DIO0_PIN);
+    LoRa.setPins(RADIO_CS_PIN, RADIO_RST_PIN, RADIO_DIO0_PIN);
 
-  LoRa.setPins(RADIO_CS_PIN, RADIO_RST_PIN, RADIO_DIO0_PIN);
-
-  Serial.print("Starting LoRa at ");
-  Serial.print(CONFIG_RADIO_FREQ);
-  Serial.println(" MHz ...");
-
-  if (!LoRa.begin(CONFIG_RADIO_FREQ * 1000000)) {
-    Serial.println("ERROR: LoRa module not found or not powered!");
-    Serial.println("Check CS/RST/DIO0 pins and 3.3V supply.");
-  } else {
-    Serial.println("LoRa module started successfully!");
-
-    applyLoRaSettings();
-    LoRa.setPreambleLength(16);
-    LoRa.setSyncWord(0xAB);
-    LoRa.enableCrc();
-    LoRa.disableInvertIQ();
-    LoRa.setCodingRate4(7);
-
-    Serial.println("LoRa settings applied.");
-  }
+    if (!LoRa.begin(CONFIG_RADIO_FREQ * 1000000)) {
+        Serial.println("ERROR: LoRa module not found!");
+        while (true);
+    } else {
+        Serial.println("LoRa started successfully.");
+        LoRa.setPreambleLength(16);
+        LoRa.setSyncWord(0xAB);
+        LoRa.enableCrc();
+        LoRa.disableInvertIQ();
+        LoRa.setCodingRate4(7);
+        LoRa.setSpreadingFactor(spreadingFactor);
+        LoRa.setSignalBandwidth(signalBandwidth * 1000);
+        LoRa.setTxPower(txPower);
+    }
 }
 
 void loop() {
+    // GPS обработка
     while (gpsSerial.available() > 0) {
         if (gps.encode(gpsSerial.read())) {
             if (gps.location.isValid()) {
                 lastLat = gps.location.lat();
                 lastLng = gps.location.lng();
                 hasFix = true;
-                Serial.print("GPS Fix: ");
-                Serial.print(lastLat, 6);
-                Serial.print(", ");
-                Serial.println(lastLng, 6);
             }
         }
     }
 
-    if (millis() > 5000 && gps.charsProcessed() < 10) {
-        Serial.println(F("Warning: No GPS data detected yet."));
-    }
-
-    if (packetsSent == 0 && hasFix) {
-        char buf[64];
+    //Генерация ID 
+    if (hasFix && currentID == 0) {
+        char buf[80];
         snprintf(buf, sizeof(buf), "%lu-%.6f-%.6f", millis(), lastLat, lastLng);
         currentID = fnv1a_hash(buf);
-        seqNum = 0;
-        packetsSent = 0;
-        Serial.print("New Packet ID: ");
-        Serial.println(currentID, HEX);
+        Serial.print("Generated ID: ");
+        Serial.println(String(currentID, HEX));
     }
 
-    unsigned long now = millis();
-    if (now - lastSend >= sendInterval && hasFix) {
-        lastSend = now;
+    // Приём новых параметров по UART
+    if (Serial1.available()) {
+        String cmd = Serial1.readStringUntil('\n');
+        cmd.trim();
+        if (cmd.length() > 0) {
+            Serial.println("UART RX: " + cmd);
 
-        if (!LoRa.beginPacket()) {
-            Serial.println("LoRa not ready, skipping packet");
-        } else {
-            LoRa.print("ID:");
-            LoRa.print(currentID, HEX);
-            LoRa.print(" SEQ:");
-            LoRa.print(seqNum);
-            LoRa.print(" Lat:");
-            LoRa.print(lastLat, 6);
-            LoRa.print(" Lng:");
-            LoRa.print(lastLng, 6);
-            LoRa.endPacket();
+            int sf, pwr;
+            float bw;
+            if (sscanf(cmd.c_str(), "PARAMS SF:%d BW:%f PWR:%d", &sf, &bw, &pwr) == 3) {
+                spreadingFactor = sf;
+                signalBandwidth = bw;
+                txPower = pwr;
 
-            Serial.print("Packet sent: ID=");
-            Serial.print(currentID, HEX);
-            Serial.print(" SEQ=");
-            Serial.println(seqNum);
+                // применяем новые настройки
+                LoRa.setSpreadingFactor(spreadingFactor);
+                LoRa.setSignalBandwidth(signalBandwidth * 1000);
+                LoRa.setTxPower(txPower);
 
-            seqNum++;
-            packetsSent++;
+                Serial.printf("[UART] Applied params: SF=%d BW=%.1f kHz PWR=%d dBm\n",
+                              spreadingFactor, signalBandwidth, txPower);
 
-            if (packetsSent >= packetsPerID) {
-                packetsSent = 0; 
+                Serial1.println("OK");
+                Serial.println("Sent OK via UART");
             }
         }
     }
 
-    if (u8g2) {
-        u8g2->clearBuffer();
-        if (hasFix) {
-            char buf[32];
-            snprintf(buf, sizeof(buf), "Lat: %.6f", lastLat);
-            u8g2->drawStr(0, 12, buf);
-            snprintf(buf, sizeof(buf), "Lng: %.6f", lastLng);
-            u8g2->drawStr(0, 26, buf);
-            snprintf(buf, sizeof(buf), "ID: %08X SEQ: %d", currentID, seqNum-1);
-            u8g2->drawStr(0, 40, buf);
+    //Проверка кнопки 
+    static bool buttonPressed = false;
+
+    if (digitalRead(BUTTON_PIN) == LOW && !buttonPressed) {
+        buttonPressed = true;
+        Serial.println("Button pressed.");
+
+        if (hasFix && currentID != 0) {
+            // Формируем сообщение
+            String msg = String("INIT ID:") + String(currentID, HEX) +
+                         " Lat:" + String(lastLat, 6) +
+                         " Lng:" + String(lastLng, 6) +
+                         " SF:" + String(spreadingFactor) +
+                         " BW:" + String(signalBandwidth, 1) +
+                         " PWR:" + String(txPower);
+
+            // Отправляем в Serial1
+            Serial1.println(msg);
+            Serial.println("Sent to Serial1: " + msg);
+
+            // Ожидаем ответ "OK"
+            unsigned long startTime = millis();
+            bool okReceived = false;
+            while (millis() - startTime < 10000) { // ждем 10 секунды
+                if (Serial1.available()) {
+                    String response = Serial1.readStringUntil('\n');
+                    response.trim();
+                    if (response.equalsIgnoreCase("OK")) {
+                        okReceived = true;
+                        Serial.println("Received OK from Serial1.");
+                        break;
+                    }
+                }
+            }
+
+            // Если получен OK, отправляем 10 пакетов по LoRa
+            if (okReceived) {
+                Serial.println("Sending 10 LoRa packets...");
+
+                // Формируем сообщение, одинаковое для всех пакетов
+                String packetMsg = String("ID:") + String(currentID, HEX) + ",ADCDEF";
+
+                for (int i = 0; i < 10; i++) {
+                    LoRa.beginPacket();
+                    LoRa.print(packetMsg);
+                    LoRa.endPacket();
+                    Serial.printf("LoRa packet %d sent: %s\n", i + 1, packetMsg.c_str());
+                    delay(500);
+                }
+
+                Serial.println("All 10 packets sent.");
+            }
+
+                Serial.println("All 10 packets sent.");
+            } else {
+                Serial.println("No OK received. LoRa not transmitted.");
+            }
         } else {
-            u8g2->drawStr(0, 12, "No GPS Fix");
+            Serial.println("No GPS fix or ID not generated yet!");
         }
-        u8g2->sendBuffer();
     }
 
-    delay(100);
-}
-
-
-
-
-
-
-void displayLocationInfo() {
-  Serial.println(F("-------------------------------------"));
-  Serial.println("\n Location Info:");
-
-  if (gps.location.isValid()) {
-    Serial.print("Latitude:  ");
-    Serial.print(gps.location.lat(), 6);
-    Serial.print(" ");
-    Serial.println(gps.location.rawLat().negative ? "S" : "N");
-
-    Serial.print("Longitude: ");
-    Serial.print(gps.location.lng(), 6);
-    Serial.print(" ");
-    Serial.println(gps.location.rawLng().negative ? "W" : "E");
-
-    Serial.print("Fix Quality: ");
-    Serial.println(gps.location.isValid() ? "Valid" : "Invalid");
-
-    Serial.print("Satellites: ");
-    Serial.println(gps.satellites.value());
-
-    Serial.print("Altitude:   ");
-    Serial.print(gps.altitude.meters());
-    Serial.println(" m");
-
-    Serial.print("Speed:      ");
-    Serial.print(gps.speed.kmph());
-    Serial.println(" km/h");
-
-    Serial.print("Course:     ");
-    Serial.print(gps.course.deg());
-    Serial.println("°");
-
-    Serial.print("Date:       ");
-    if (gps.date.isValid()) {
-      Serial.printf("%02d/%02d/%04d\n", gps.date.day(), gps.date.month(), gps.date.year());
-    } else {
-      Serial.println("Invalid");
+    // сброс состояния кнопки при отпускании
+    if (digitalRead(BUTTON_PIN) == HIGH) {
+        buttonPressed = false;
     }
 
-    Serial.print("Time (UTC): ");
-    if (gps.time.isValid()) {
-      Serial.printf("%02d:%02d:%02d\n", gps.time.hour(), gps.time.minute(), gps.time.second());
-    } else {
-      Serial.println("Invalid");
-    }
-  }
-  
-  Serial.println(F("-------------------------------------"));
+    delay(50);
 }

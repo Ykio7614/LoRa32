@@ -329,7 +329,7 @@ void sendLoRaPacket(int packetNumber) {
   payload += ", RSSI: -" + String(random(60, 120));  // Имитация уровня сигнала
   
   // Формирование полного пакета
-  String packet = "{" + transmissionID + ", " + payload + "}";
+  String packet = transmissionID + ", " + payload;
   
   // Отправка через LoRa
   LoRa.beginPacket();
